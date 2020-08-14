@@ -2,13 +2,14 @@ import React, {useCallback} from 'react';
 import {ScrollView, StyleSheet, Linking} from 'react-native';
 import {Box, Text, TextMultiline, Toolbar, ButtonSingleLine} from 'components';
 import {useI18n} from 'locale';
-import {useNavigation, useFocusEffect} from '@react-navigation/native';
+import {useNavigation} from '@react-navigation/native';
 import {useStorage} from 'services/StorageService';
 import {getRegionCase} from 'shared/RegionLogic';
 import {BulletPoint} from 'components/BulletPoint';
 import {BulletPointOrdered} from 'components/BulletPointOrdered';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {useAccessibilityAutoFocus, focusOnElement} from 'shared/useAccessibilityAutoFocus';
+import {useAccessibilityAutoFocus} from 'shared/useAccessibilityAutoFocus';
+import {captureException} from 'shared/log';
 
 interface ContentProps {
   title: string;
@@ -20,16 +21,13 @@ interface ContentProps {
 }
 
 const Content = ({title, body, notCoveredList, coveredList, externalLinkText, externalLinkCTA}: ContentProps) => {
-  const [focusRef, autoFocusRef] = useAccessibilityAutoFocus(true);
-  useFocusEffect(() => {
-    focusOnElement(focusRef);
-  });
+  const autoFocusRef = useAccessibilityAutoFocus(true);
   const externalLinkButton =
     externalLinkCTA && externalLinkText ? (
       <ButtonSingleLine
         variant="bigFlat"
         text={externalLinkText}
-        onPress={() => Linking.openURL(externalLinkCTA).catch(err => console.error('An error occurred', err))}
+        onPress={() => Linking.openURL(externalLinkCTA).catch(error => captureException('An error occurred', error))}
         externalLink
       />
     ) : null;

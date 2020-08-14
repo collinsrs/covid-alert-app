@@ -12,21 +12,23 @@ export const NoExposureNoRegionView = ({isBottomSheetExpanded}: {isBottomSheetEx
   const i18n = useI18n();
   const {onboardedDatetime, skipAllSet} = useStorage();
 
-  const [, autoFocusRef] = useAccessibilityAutoFocus(!isBottomSheetExpanded);
+  const autoFocusRef = useAccessibilityAutoFocus(!isBottomSheetExpanded);
 
   if (!skipAllSet && onboardedDatetime && hoursFromNow(onboardedDatetime) < 24) {
     return (
-      <AllSetView
-        isBottomSheetExpanded={isBottomSheetExpanded}
-        titleText={i18n.translate('Home.NoExposureDetected.AllSetTitle')}
-        bodyText={i18n.translate('Home.NoExposureDetected.NoRegion.AllSetBody')}
-      />
+      <BaseHomeView iconName="thumbs-up">
+        <AllSetView
+          isBottomSheetExpanded={isBottomSheetExpanded}
+          titleText={i18n.translate('Home.NoExposureDetected.AllSetTitle')}
+          bodyText={i18n.translate('Home.NoExposureDetected.NoRegion.AllSetBody')}
+        />
+      </BaseHomeView>
     );
   }
 
   return (
     // note you can add an icon i.e. <BaseHomeView iconName="icon-offline>
-    <BaseHomeView>
+    <BaseHomeView iconName="thumbs-up">
       <Text focusRef={autoFocusRef} variant="bodyTitle" color="bodyText" marginBottom="m" accessibilityRole="header">
         {i18n.translate('Home.NoExposureDetected.NoRegion.Title')}
       </Text>

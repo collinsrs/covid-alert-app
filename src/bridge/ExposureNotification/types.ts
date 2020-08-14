@@ -18,6 +18,7 @@ export enum Status {
   Disabled = 'disabled',
   BluetoothOff = 'bluetooth_off',
   Restricted = 'restricted',
+  PlayServicesNotAvailable = 'play_services_not_available',
 }
 
 export interface TemporaryExposureKey {
@@ -28,6 +29,7 @@ export interface TemporaryExposureKey {
 }
 
 export interface ExposureSummary {
+  attenuationDurations: number[];
   daysSinceLastExposure: number;
   lastExposureTimestamp: number;
   matchedKeyCount: number;
@@ -36,7 +38,8 @@ export interface ExposureSummary {
 
 export interface ExposureConfiguration {
   metadata?: object;
-  minimumRiskScore: number;
+  minimumExposureDurationMinutes?: number;
+  attenuationDurationThresholds: number[];
   attenuationLevelValues: number[];
   attenuationWeight: number;
   daysSinceLastExposureLevelValues: number[];
@@ -51,6 +54,7 @@ export interface ExposureInformation {
   dateMillisSinceEpoch: number;
   durationMinutes: number;
   attenuationValue: number;
+  attenuationDurations: number[];
   transmissionRiskLevel: RiskLevel;
   totalRiskScore: number;
 }

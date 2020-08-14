@@ -11,15 +11,17 @@ import {BaseHomeView} from '../components/BaseHomeView';
 export const NoExposureCoveredRegionView = ({isBottomSheetExpanded}: {isBottomSheetExpanded: boolean}) => {
   const i18n = useI18n();
   const {onboardedDatetime, skipAllSet} = useStorage();
-  const [, autoFocusRef] = useAccessibilityAutoFocus(!isBottomSheetExpanded);
+  const autoFocusRef = useAccessibilityAutoFocus(!isBottomSheetExpanded);
 
   if (!skipAllSet && onboardedDatetime && hoursFromNow(onboardedDatetime) < 24) {
     return (
-      <AllSetView
-        isBottomSheetExpanded={isBottomSheetExpanded}
-        titleText={i18n.translate('Home.NoExposureDetected.AllSetTitle')}
-        bodyText={i18n.translate('Home.NoExposureDetected.RegionCovered.AllSetBody')}
-      />
+      <BaseHomeView iconName="thumbs-up">
+        <AllSetView
+          isBottomSheetExpanded={isBottomSheetExpanded}
+          titleText={i18n.translate('Home.NoExposureDetected.AllSetTitle')}
+          bodyText={i18n.translate('Home.NoExposureDetected.RegionCovered.AllSetBody')}
+        />
+      </BaseHomeView>
     );
   }
   return (

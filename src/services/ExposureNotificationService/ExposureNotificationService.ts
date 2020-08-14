@@ -2,12 +2,14 @@ import ExposureNotification, {
   ExposureSummary,
   Status as SystemStatus,
   ExposureConfiguration,
+  TemporaryExposureKey,
 } from 'bridge/ExposureNotification';
 import PushNotification from 'bridge/PushNotification';
 import {addDays, periodSinceEpoch, minutesBetween, getCurrentDate, daysBetweenUTC, daysBetween} from 'shared/date-fns';
 import {I18n} from 'locale';
 import {Observable, MapObservable} from 'shared/Observable';
 import {captureException, captureMessage} from 'shared/log';
+import {Platform} from 'react-native';
 
 import {BackendInterface, SubmissionKeySet} from '../BackendService';
 
@@ -16,13 +18,7 @@ import exposureConfigurationSchema from './ExposureConfigurationSchema.json';
 import {ExposureConfigurationValidator, ExposureConfigurationValidationError} from './ExposureConfigurationValidator';
 
 const SUBMISSION_AUTH_KEYS = 'submissionAuthKeys';
-const EXPOSURE_CONFIGURATION = 'exposure-configuration';
-
-const SECURE_OPTIONS = {
-  sharedPreferencesName: 'covidShieldSharedPreferences',
-  keychainService: 'covidShieldKeychain',
-};
-const SECURE_OPTIONS_FOR_CONFIGURATION = {...SECURE_OPTIONS, kSecAttrAccessible: 'kSecAttrAccessibleAlways'};
+const EXPOSURE_CONFIGURATION = 'exposureConfiguration';
 
 export const EXPOSURE_STATUS = 'exposureStatus';
 
@@ -32,18 +28,26 @@ export const EXPOSURE_NOTIFICATION_CYCLE = 14;
 
 export const MINIMUM_REMINDER_INTERVAL_MINUTES = 180;
 
+export const cannotGetTEKsError = new Error('Unable to retrieve TEKs');
+
 export {SystemStatus};
+
+export enum ExposureStatusType {
+  Monitoring = 'monitoring',
+  Exposed = 'exposed',
+  Diagnosed = 'diagnosed',
+}
 
 export type ExposureStatus =
   | {
-      type: 'monitoring';
+      type: ExposureStatusType.Monitoring;
       lastChecked?: {
         period: number;
         timestamp: number;
       };
     }
   | {
-      type: 'exposed';
+      type: ExposureStatusType.Exposed;
       summary: ExposureSummary;
       notificationSent?: boolean;
       lastChecked?: {
@@ -52,7 +56,7 @@ export type ExposureStatus =
       };
     }
   | {
-      type: 'diagnosed';
+      type: ExposureStatusType.Diagnosed;
       needsSubmission: boolean;
       submissionLastCompletedAt?: number;
       uploadReminderLastSentAt?: number;
@@ -70,13 +74,12 @@ export interface PersistencyProvider {
 }
 
 export interface SecurePersistencyProvider {
-  setItem(key: string, value: string, options: SecureStorageOptions): Promise<null>;
-  getItem(key: string, options: SecureStorageOptions): Promise<string | null>;
+  set(key: string, value: string, options: SecureStorageOptions): Promise<null>;
+  get(key: string): Promise<string | null>;
 }
 
 export interface SecureStorageOptions {
-  keychainService?: string;
-  sharedPreferencesName?: string;
+  accessible?: string;
 }
 
 export class ExposureNotificationService {
@@ -109,7 +112,7 @@ export class ExposureNotificationService {
     this.i18n = i18n;
     this.exposureNotification = exposureNotification;
     this.systemStatus = new Observable<SystemStatus>(SystemStatus.Undefined);
-    this.exposureStatus = new MapObservable<ExposureStatus>({type: 'monitoring'});
+    this.exposureStatus = new MapObservable<ExposureStatus>({type: ExposureStatusType.Monitoring});
     this.backendInterface = backendInterface;
     this.storage = storage;
     this.secureStorage = secureStorage;
@@ -131,11 +134,10 @@ export class ExposureNotificationService {
       await this.exposureNotification.start();
     } catch (error) {
       captureException('Cannot start EN framework', error);
-      this.systemStatus.set(SystemStatus.Unknown);
-      return;
     }
 
     await this.updateSystemStatus();
+
     this.starting = false;
     await this.updateExposureStatus();
   }
@@ -172,10 +174,14 @@ export class ExposureNotificationService {
   async startKeysSubmission(oneTimeCode: string): Promise<void> {
     const keys = await this.backendInterface.claimOneTimeCode(oneTimeCode);
     const serialized = JSON.stringify(keys);
-    await this.secureStorage.setItem(SUBMISSION_AUTH_KEYS, serialized, SECURE_OPTIONS);
+    try {
+      await this.secureStorage.set(SUBMISSION_AUTH_KEYS, serialized, {});
+    } catch (error) {
+      captureException('Unable to store SUBMISSION_AUTH_KEYS', error);
+    }
     const cycleStartsAt = getCurrentDate();
     this.exposureStatus.append({
-      type: 'diagnosed',
+      type: ExposureStatusType.Diagnosed,
       needsSubmission: true,
       cycleStartsAt: cycleStartsAt.getTime(),
       cycleEndsAt: addDays(cycleStartsAt, EXPOSURE_NOTIFICATION_CYCLE).getTime(),
@@ -183,14 +189,21 @@ export class ExposureNotificationService {
   }
 
   async fetchAndSubmitKeys(): Promise<void> {
-    const submissionKeysStr = await this.secureStorage.getItem(SUBMISSION_AUTH_KEYS, SECURE_OPTIONS);
+    const submissionKeysStr = await this.secureStorage.get(SUBMISSION_AUTH_KEYS);
     if (!submissionKeysStr) {
-      throw new Error('No Upload keys found, did you forget to claim one-time code?');
+      throw new Error('Submission keys: bad certificate');
     }
     const auth = JSON.parse(submissionKeysStr) as SubmissionKeySet;
-    const diagnosisKeys = await this.exposureNotification.getTemporaryExposureKeyHistory();
-    if (diagnosisKeys.length > 0) {
-      await this.backendInterface.reportDiagnosisKeys(auth, diagnosisKeys);
+    let temporaryExposureKeys: TemporaryExposureKey[];
+    try {
+      temporaryExposureKeys = await this.exposureNotification.getTemporaryExposureKeyHistory();
+    } catch {
+      throw cannotGetTEKsError;
+    }
+    if (temporaryExposureKeys.length > 0) {
+      await this.backendInterface.reportDiagnosisKeys(auth, temporaryExposureKeys);
+    } else {
+      captureMessage('No TEKs available to upload');
     }
     await this.recordKeySubmission();
   }
@@ -207,10 +220,7 @@ export class ExposureNotificationService {
   private async getAlternateExposureConfiguration(): Promise<ExposureConfiguration> {
     try {
       captureMessage('Getting exposure configuration from secure storage.');
-      const exposureConfigurationStr = await this.secureStorage.getItem(
-        EXPOSURE_CONFIGURATION,
-        SECURE_OPTIONS_FOR_CONFIGURATION,
-      );
+      const exposureConfigurationStr = await this.storage.getItem(EXPOSURE_CONFIGURATION);
       if (exposureConfigurationStr) {
         return JSON.parse(exposureConfigurationStr);
       } else {
@@ -224,13 +234,13 @@ export class ExposureNotificationService {
 
   private async recordKeySubmission() {
     const currentStatus = this.exposureStatus.get();
-    if (currentStatus.type !== 'diagnosed') return;
+    if (currentStatus.type !== ExposureStatusType.Diagnosed) return;
     this.exposureStatus.append({needsSubmission: false, submissionLastCompletedAt: getCurrentDate().getTime()});
   }
 
   private async calculateNeedsSubmission(): Promise<boolean> {
     const exposureStatus = this.exposureStatus.get();
-    if (exposureStatus.type !== 'diagnosed') return false;
+    if (exposureStatus.type !== ExposureStatusType.Diagnosed) return false;
 
     const today = getCurrentDate();
     const cycleEndsAt = new Date(exposureStatus.cycleEndsAt);
@@ -290,7 +300,7 @@ export class ExposureNotificationService {
       );
       captureMessage('Using downloaded exposureConfiguration.');
       const serialized = JSON.stringify(exposureConfiguration);
-      await this.secureStorage.setItem(EXPOSURE_CONFIGURATION, serialized, SECURE_OPTIONS_FOR_CONFIGURATION);
+      await this.storage.setItem(EXPOSURE_CONFIGURATION, serialized);
       captureMessage('Saving exposure configuration to secure storage.');
     } catch (error) {
       if (error instanceof SyntaxError) {
@@ -329,22 +339,22 @@ export class ExposureNotificationService {
 
     const currentStatus = this.exposureStatus.get();
 
-    if (currentStatus.type === 'diagnosed') {
+    if (currentStatus.type === ExposureStatusType.Diagnosed) {
       const today = getCurrentDate();
       const cycleEndsAt = new Date(currentStatus.cycleEndsAt);
       // There is a case where using UTC and device timezone could mess up user experience. See `date-fn.spec.ts`
       // Let's use device timezone for resetting exposureStatus for now
       // Ref https://github.com/cds-snc/covid-shield-mobile/issues/676
       if (daysBetween(today, cycleEndsAt) <= 0) {
-        this.exposureStatus.set({type: 'monitoring', lastChecked: currentStatus.lastChecked});
+        this.exposureStatus.set({type: ExposureStatusType.Monitoring, lastChecked: currentStatus.lastChecked});
         return finalize();
       }
       return finalize({needsSubmission: await this.calculateNeedsSubmission()});
-    } else if (currentStatus.type === 'exposed') {
+    } else if (currentStatus.type === ExposureStatusType.Exposed) {
       const today = getCurrentDate();
       const lastExposureAt = new Date(currentStatus.summary.lastExposureTimestamp || today.getTime());
       if (daysBetween(lastExposureAt, today) >= EXPOSURE_NOTIFICATION_CYCLE) {
-        this.exposureStatus.set({type: 'monitoring', lastChecked: currentStatus.lastChecked});
+        this.exposureStatus.set({type: ExposureStatusType.Monitoring, lastChecked: currentStatus.lastChecked});
         return finalize();
       }
     }
@@ -368,12 +378,18 @@ export class ExposureNotificationService {
     });
 
     try {
+      const {minimumExposureDurationMinutes} = exposureConfiguration;
       const summary = await this.exposureNotification.detectExposure(exposureConfiguration, keysFileUrls);
       captureMessage('summary', {summary});
-      if (summary.matchedKeyCount > 0) {
+      // on ios attenuationDurations is in seconds, on android it is in minutes
+      const divisor = Platform.OS === 'ios' ? 60 : 1;
+      const durationAtImmediateMinutes = summary.attenuationDurations[0] / divisor;
+      const durationAtNearMinutes = summary.attenuationDurations[1] / divisor;
+      const exposureDurationMinutes = durationAtImmediateMinutes + durationAtNearMinutes;
+      if (minimumExposureDurationMinutes && Math.round(exposureDurationMinutes) >= minimumExposureDurationMinutes) {
         return finalize(
           {
-            type: 'exposed',
+            type: ExposureStatusType.Exposed,
             summary: this.selectExposureSummary(summary),
           },
           lastCheckedPeriod,
@@ -388,14 +404,14 @@ export class ExposureNotificationService {
   }
 
   private async processPendingExposureSummary() {
-    const summary = await this.exposureNotification.getPendingExposureSummary();
+    const summary = await this.exposureNotification.getPendingExposureSummary().catch(() => undefined);
     const exposureStatus = this.exposureStatus.get();
-    if (exposureStatus.type === 'diagnosed' || !summary || summary.matchedKeyCount <= 0) {
+    if (exposureStatus.type === ExposureStatusType.Diagnosed || !summary || summary.matchedKeyCount <= 0) {
       return;
     }
     const today = getCurrentDate();
     this.exposureStatus.append({
-      type: 'exposed',
+      type: ExposureStatusType.Exposed,
       summary: this.selectExposureSummary(summary),
       lastChecked: {
         timestamp: today.getTime(),
@@ -406,7 +422,7 @@ export class ExposureNotificationService {
 
   private selectExposureSummary(nextSummary: ExposureSummary): ExposureSummary {
     const exposureStatus = this.exposureStatus.get();
-    const currentSummary = exposureStatus.type === 'exposed' ? exposureStatus.summary : undefined;
+    const currentSummary = exposureStatus.type === ExposureStatusType.Exposed ? exposureStatus.summary : undefined;
     const currentLastExposureTimestamp = currentSummary?.lastExposureTimestamp || 0;
     const nextLastExposureTimestamp = nextSummary.lastExposureTimestamp || 0;
     return !currentSummary || nextLastExposureTimestamp > currentLastExposureTimestamp ? nextSummary : currentSummary;
@@ -414,7 +430,7 @@ export class ExposureNotificationService {
 
   private async processNotification() {
     const exposureStatus = this.exposureStatus.get();
-    if (exposureStatus.type === 'exposed' && !exposureStatus.notificationSent) {
+    if (exposureStatus.type === ExposureStatusType.Exposed && !exposureStatus.notificationSent) {
       PushNotification.presentLocalNotification({
         alertTitle: this.i18n.translate('Notification.ExposedMessageTitle'),
         alertBody: this.i18n.translate('Notification.ExposedMessageBody'),
@@ -424,7 +440,7 @@ export class ExposureNotificationService {
       });
     }
     if (
-      exposureStatus.type === 'diagnosed' &&
+      exposureStatus.type === ExposureStatusType.Diagnosed &&
       exposureStatus.needsSubmission &&
       (!exposureStatus.uploadReminderLastSentAt ||
         minutesBetween(new Date(exposureStatus.uploadReminderLastSentAt), new Date()) >

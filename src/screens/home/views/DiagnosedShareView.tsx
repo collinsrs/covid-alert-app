@@ -10,10 +10,10 @@ export const DiagnosedShareView = ({isBottomSheetExpanded}: {isBottomSheetExpand
   const i18n = useI18n();
   const navigation = useNavigation();
   const toDataShare = useCallback(() => navigation.navigate('DataSharing'), [navigation]);
-  const [, autoFocusRef] = useAccessibilityAutoFocus(!isBottomSheetExpanded);
+  const autoFocusRef = useAccessibilityAutoFocus(!isBottomSheetExpanded);
 
   return (
-    <BaseHomeView iconName="hand-reminder">
+    <BaseHomeView iconName="hand-reminder" testID="diagnosedShare">
       <Text focusRef={autoFocusRef} variant="bodyTitle" color="bodyText" marginBottom="m" accessibilityRole="header">
         {i18n.translate('Home.DiagnosedShareView.Title')}
       </Text>
