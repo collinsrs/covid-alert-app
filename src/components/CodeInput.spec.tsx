@@ -32,12 +32,6 @@ describe('CodeInput', () => {
     jest.resetAllMocks();
   });
 
-  it('returns trimmed text', async () => {
-    const textInput = componentQuery.getByHintText('codeInput');
-    fireEvent.changeText(textInput, ' MYSECRETCODE ');
-    expect(changeMock).toHaveBeenCalledWith('MYSECRETCODE');
-  });
-
   // eslint-disable-next-line jest/no-commented-out-tests
   /* TODO: uncomment after https://github.com/cds-snc/covid-alert-app/pull/844 is merged
   it('disallows special characters on input', () => {
