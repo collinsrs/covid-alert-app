@@ -2,6 +2,7 @@ import React, {useCallback, useState} from 'react';
 
 import {Box} from './Box';
 import {TextInput} from './TextInput';
+import {sanitizeOneTimeCode} from 'shared/code-fns';
 
 export interface CodeInputProps {
   value: string;
@@ -13,7 +14,7 @@ export const CodeInput = ({value, onChange, accessibilityLabel}: CodeInputProps)
   const onChangeTrimmed = useCallback(
     text => {
       // Remove any character that is not alphanumeric (or a space)
-      const modifiedText = text.replace(/[^a-zA-Z0-9\s-]*/g, '');
+      const modifiedText = sanitizeOneTimeCode(text);
       onChange(modifiedText);
     },
     [onChange],
