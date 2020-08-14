@@ -1,8 +1,8 @@
 import React, {useCallback, useState} from 'react';
+import {sanitizeOneTimeCode} from 'shared/code-fns';
 
 import {Box} from './Box';
 import {TextInput} from './TextInput';
-import {sanitizeOneTimeCode} from 'shared/code-fns';
 
 export interface CodeInputProps {
   value: string;

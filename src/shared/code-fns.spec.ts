@@ -1,4 +1,5 @@
 import {sanitizeOneTimeCode} from './code-fns';
+
 describe('code-fns', () => {
   describe('sanitizeOneTimeCode', () => {
     it('returns code with no special characters', () => {
